@@ -40,15 +40,17 @@ class SurvivalDatasetFactory:
         r"""
         Initialize the factory to store metadata, survival label, and slide_ids for each case id. 
 
+        most of them come from args 
+
         Args:
-            - study : String 
-            - label_file : String 
-            - omics_dir : String
+            - study : String                      #taken from args
+            - label_file : String                
+            - omics_dir : String                  
             - seed : Int
             - print_info : Boolean
             - n_bins : Int
             - label_col: String
-            - eps Float
+            - eps Float                           # 1e-6
             - num_patches : Int 
             - is_mcat : Boolean
             - is_survapth : Boolean 
@@ -84,7 +86,7 @@ class SurvivalDatasetFactory:
             self.censorship_var = "censorship_dss"
 
         #---> process omics data
-        self._setup_omics_data() 
+        self._setup_omics_data()    # start with biological molecules info
         
         #---> labels, metadata, patient_df
         self._setup_metadata_and_labels(eps)
@@ -121,8 +123,8 @@ class SurvivalDatasetFactory:
         self.signatures = pd.read_csv("./datasets_csv/metadata/signatures.csv")
         self.omic_names = []
         for col in self.signatures.columns:
-            omic = self.signatures[col].dropna().unique()
-            omic = sorted(_series_intersection(omic, self.all_modalities["rna"].columns))
+            omic = self.signatures[col].dropna().unique()   # keep only unique and not na
+            omic = sorted(_series_intersection(omic, self.all_modalities["rna"].columns))  # function from utils; Returns insersection of two sets
             self.omic_names.append(omic)
         self.omic_sizes = [len(omic) for omic in self.omic_names]
 
@@ -149,7 +151,7 @@ class SurvivalDatasetFactory:
         self.omic_names = []
         for col in self.signatures.columns:
             omic = self.signatures[col].dropna().unique()
-            omic = sorted(_series_intersection(omic, self.all_modalities["rna"].columns))
+            omic = sorted(_series_intersection(omic, self.all_modalities["rna"].columns))  # function from 
             self.omic_names.append(omic)
         self.omic_sizes = [len(omic) for omic in self.omic_names]
             
@@ -165,12 +167,13 @@ class SurvivalDatasetFactory:
             - None
             
         """
+        # self.study from the args
         path_to_data = "./datasets_csv/clinical_data/{}_clinical.csv".format(self.study)
         self.clinical_data = pd.read_csv(path_to_data, index_col=0)
     
     def _setup_omics_data(self):
         r"""
-        read the csv with the omics data
+        read the csv with the omics data  (biological molecules)  
         
         Args:
             - self
@@ -180,10 +183,10 @@ class SurvivalDatasetFactory:
         
         """
         self.all_modalities = {}
-        for modality in ALL_MODALITIES:
+        for modality in ALL_MODALITIES:       ## ALL_MODALITIES = ['rna_clean.csv'] in xena
             self.all_modalities[modality.split('_')[0]] = pd.read_csv(
-                os.path.join(self.omics_dir, modality),
-                engine='python',
+                os.path.join(self.omics_dir, modality),    # omics_dir attribute of args
+                engine='python', 
                 index_col=0
             )
 
@@ -205,10 +208,10 @@ class SurvivalDatasetFactory:
         self.label_data = pd.read_csv(self.label_file, low_memory=False)
 
         #---> minor clean-up of the labels 
-        uncensored_df = self._clean_label_data()
+        uncensored_df = self._clean_label_data()  # obtain the uncensored patients (c=0, death observed)
 
         #---> create discrete labels
-        self._discretize_survival_months(eps, uncensored_df)
+        self._discretize_survival_months(eps, uncensored_df) # obtain classification problem
     
         #---> get patient info, labels, and metada
         self._get_patient_dict()
@@ -218,6 +221,8 @@ class SurvivalDatasetFactory:
     def _clean_label_data(self):
         r"""
         Clean the metadata. For breast, only consider the IDC subtype.
+        Ignore all labels were subtype of oncotree_code is not IDC, if IDC is present; drop duplicates in labels;
+        keep only those were the censorship_var is less than 1 --> (c=0, observed death), uncernsored patients
         
         Args:
             - self 
@@ -249,7 +254,7 @@ class SurvivalDatasetFactory:
             - None 
         
         """
-        # cut the data into self.n_bins (4= quantiles)
+        # cut the data into self.n_bins (4= quantiles)   # n_bins = args.n_classes
         disc_labels, q_bins = pd.qcut(uncensored_df[self.label_col], q=self.n_bins, retbins=True, labels=False)
         q_bins[-1] = self.label_data[self.label_col].max() + eps
         q_bins[0] = self.label_data[self.label_col].min() - eps
@@ -257,6 +262,7 @@ class SurvivalDatasetFactory:
         # assign patients to different bins according to their months' quantiles (on all data)
         # cut will choose bins so that the values of bins are evenly spaced. Each bin may have different frequncies
         disc_labels, q_bins = pd.cut(self.patients_df[self.label_col], bins=q_bins, retbins=True, labels=False, right=False, include_lowest=True)
+        # returns An array-like object representing the respective bin for each value of x; and The computed or specified bins. For scalar or sequence bins, this is an ndarray with the computed bins
         self.patients_df.insert(2, 'label', disc_labels.values.astype(int))
         self.bins = q_bins
         
@@ -278,6 +284,7 @@ class SurvivalDatasetFactory:
     def _get_label_dict(self):
         r"""
         For the discretized survival times and censorship, we define labels and store their counts.
+        Associate a class for each bin-censorship option, and put the new class as 'label' of label_data
         
         Args:
             - self 
@@ -289,36 +296,42 @@ class SurvivalDatasetFactory:
 
         label_dict = {}
         key_count = 0
-        for i in range(len(self.bins)-1):
+        for i in range(len(self.bins)-1):  # obtain label_dict = {(0-5,0) : 0; (0-5,1): 1; (5-10,0): 2; ...}? to len(self_bins -2)
             for c in [0, 1]:
                 label_dict.update({(i, c):key_count})
                 key_count+=1
 
-        for i in self.label_data.index:
-            key = self.label_data.loc[i, 'label']
-            self.label_data.at[i, 'disc_label'] = key
+        for i in self.label_data.index: # for each sample, i is the index
+            key = self.label_data.loc[i, 'label'] 
+            self.label_data.at[i, 'disc_label'] = key    # Access a single value for a row/column label pair.
             censorship = self.label_data.loc[i, self.censorship_var]
             key = (key, int(censorship))
-            self.label_data.at[i, 'label'] = label_dict[key]
+            self.label_data.at[i, 'label'] = label_dict[key]  # put the corresponding key_count in 'label' of label_data; give class for each bin-censorship option
 
         self.num_classes=len(label_dict)
         self.label_dict = label_dict
 
     def _get_patient_dict(self):
         r"""
-        For every patient store the respective slide ids
+        For every patient store the respective slide ids in self.patient_df --> patient_df = {case_id of patient: [list of slide_id of patient]; ...}
+
+        ## at the beginning
+        ## self.patients_df = self.label_data.drop_duplicates(['case_id']).copy()  plus add new column for the discretization
+        ## self.label_data = pd.read_csv(self.label_file, low_memory=False); label_file from args
 
         Args:
             - self 
         
         Returns:
             - None
+
+        ## at the end   self.label_data = self.patients_df
         """
     
         patient_dict = {}
-        temp_label_data = self.label_data.set_index('case_id')
+        temp_label_data = self.label_data.set_index('case_id')  # create an index for the df using the column 'case_id'
         for patient in self.patients_df['case_id']:
-            slide_ids = temp_label_data.loc[patient, 'slide_id']
+            slide_ids = temp_label_data.loc[patient, 'slide_id']  # Access a group of rows and columns by label(s) or a boolean array
             if isinstance(slide_ids, str):
                 slide_ids = np.array(slide_ids).reshape(-1)
             else:
@@ -332,17 +345,22 @@ class SurvivalDatasetFactory:
         r"""
         Find which patient/slide belongs to which label and store the label-wise indices of patients/ slides
 
-        Args:
+        creates self.patient_cls_ids: list of sample patients that have as label the same class as the index except for 0
+        creates self.slide_cls_ids: list of sample slides that have as label the same class as the index except for 0
+        one patient/slide for each class
+
+        Args:()
             - self 
         
         Returns:
             - None
 
         """
-        self.patient_cls_ids = [[] for i in range(self.num_classes)]   
+        self.patient_cls_ids = [[] for i in range(self.num_classes)]   #create a 'matrix', one element array for each range(self.num_classes)
         # Find the index of patients for different labels
-        for i in range(self.num_classes):
-            self.patient_cls_ids[i] = np.where(self.patient_data['label'] == i)[0] 
+        for i in range(self.num_classes):  # for each classification class
+            self.patient_cls_ids[i] = np.where(self.patient_data['label'] == i)[0]   # equal to np.asarray(condition).nonzero(): Convert the input to an array (asarray); Return the indices of the elements that are non-zero. Then takes first one
+            # takes index of first sample that has class i as 'label' and that doesn't have 0 as a value
 
         # Find the index of slides for different labels
         self.slide_cls_ids = [[] for i in range(self.num_classes)]
@@ -352,7 +370,7 @@ class SurvivalDatasetFactory:
     def _summarize(self):
         r"""
         Summarize which type of survival you are using, number of cases and classes
-        
+        print useful information about columns; num of cases (samples), classes 
         Args:
             - self 
         
@@ -377,6 +395,10 @@ class SurvivalDatasetFactory:
         
         self.patient_data = {'case_id': patients, 'label': np.array(patient_labels)}
 
+    
+    
+    ###### not seen yet  #########
+    
     @staticmethod
     def df_prep(data, n_bins, ignore, label_col):
         mask = data[label_col].isin(ignore)

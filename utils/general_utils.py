@@ -25,9 +25,10 @@ def _prepare_for_experiment(args):
         - args : argparse.Namespace
 
     """
-
+    # print device
     args.device = device
     print(args.device)
+    # add more info in args
     args.split_dir = os.path.join("splits", args.which_splits, args.study)
     args.combined_study = args.study
     args = _get_custom_exp_code(args)
@@ -36,7 +37,7 @@ def _prepare_for_experiment(args):
     assert os.path.isdir(args.split_dir)
     print('Split dir:', args.split_dir)
 
-    #---> where to stroe the experiment related assets
+    #---> where to store the experiment related assets
     _create_results_dir(args)
 
     #---> store the settings
@@ -72,7 +73,7 @@ def _prepare_for_experiment(args):
 
 def _print_and_log_experiment(args, settings):
     r"""
-    Prints the expeirmental settings and stores them in a file 
+    Prints the experimental settings and stores them in a file (file experiment_param_code)
     
     Args:
         - args : argspace.Namespace
@@ -96,6 +97,7 @@ def _print_and_log_experiment(args, settings):
 def _get_custom_exp_code(args):
     r"""
     Updates the argparse.NameSpace with a custom experiment code.
+    nicer way to read info on experiment code saved in params_code in args
 
     Args:
         - args (NameSpace)
@@ -154,7 +156,7 @@ def _get_custom_exp_code(args):
 def _seed_torch(seed=7):
     r"""
     Sets custom seed for torch 
-
+    
     Args:
         - seed : Int 
     
@@ -166,7 +168,7 @@ def _seed_torch(seed=7):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
+    torch.manual_seed(seed)   # Sets the seed for generating random numbers on all devices
     if device.type == 'cuda':
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
@@ -176,7 +178,8 @@ def _seed_torch(seed=7):
 def _create_results_dir(args):
     r"""
     Creates a dir to store results for this experiment. Adds .gitignore 
-    
+    A dir for the results with subdir esperiment specific; and a subdir for the esperiment where to store param_code
+
     Args:
         - args: argspace.Namespace
     
@@ -201,8 +204,9 @@ def _create_results_dir(args):
 
 def _get_start_end(args):
     r"""
-    Which folds are we training on
-    
+    Which folds are we training on.
+    Get evenly distributed values within start and end of args.k
+
     Args:
         - args : argspace.Namespace
     
@@ -218,7 +222,7 @@ def _get_start_end(args):
         end = args.k
     else:
         end = args.k_end
-    folds = np.arange(start, end)
+    folds = np.arange(start, end)  # Return evenly spaced values within a given interval
     return folds
 
 def _save_splits(split_datasets, column_keys, filename, boolean_style=False):
