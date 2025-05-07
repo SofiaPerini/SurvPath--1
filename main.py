@@ -29,7 +29,7 @@ def main(args):
 
     for i in folds: 
         
-        datasets = args.dataset_factory.return_splits(
+        datasets = args.dataset_factory.return_splits(  # contains traina and validation sets for the corresponding split
             args,
             csv_path='{}/splits_{}.csv'.format(args.split_dir, i),
             fold=i
@@ -39,6 +39,7 @@ def main(args):
 
         results, (val_cindex, val_cindex_ipcw, val_BS, val_IBS, val_iauc, total_loss) = _train_val(datasets, i, args)
 
+        # saves results of training and validation for each fold
         all_val_cindex.append(val_cindex)
         all_val_cindex_ipcw.append(val_cindex_ipcw)
         all_val_BS.append(val_BS)

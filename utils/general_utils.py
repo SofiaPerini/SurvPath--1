@@ -64,7 +64,7 @@ def _prepare_for_experiment(args):
     #---> bookkeping
     _print_and_log_experiment(args, settings)
 
-    #---> load composition df 
+    #---> load composition df with pathways compositions, index them
     composition_df = pd.read_csv("./datasets_csv/pathway_compositions/{}_comps.csv".format(args.type_of_path), index_col=0)
     composition_df.sort_index(inplace=True)
     args.composition_df = composition_df
@@ -226,10 +226,22 @@ def _get_start_end(args):
     return folds
 
 def _save_splits(split_datasets, column_keys, filename, boolean_style=False):
-    splits = [split_datasets[i].metadata['slide_id'] for i in range(len(split_datasets))]
-    if not boolean_style:
-        df = pd.concat(splits, ignore_index=True, axis=1)
+    r'''
+    If Boolean False: Put the splits in the directory indicated by filename with two columns, train and val, plus a new index
+    Then prints (what?)
+
+    Args:
+        -split_databases for train and val, called datasets in core_utils
+        -column keys        ['train', 'val']
+        -filename      directory for results with subdir of current split
+        -Boolean
+    '''
+
+    splits = [split_datasets[i].metadata['slide_id'] for i in range(len(split_datasets))] # for both train and val, take relative ds and id for the slides
+    if not boolean_style:  # here for _train_val() of core_utils
+        df = pd.concat(splits, ignore_index=True, axis=1)  # Concatenate pandas objects along a particular axis (1 - column)
         df.columns = column_keys
+        # create a matrix, first column train, second column val, same format as in splits_n file, with new index
     else:
         df = pd.concat(splits, ignore_index = True, axis=0)
         index = df.values.tolist()
@@ -400,6 +412,8 @@ def _collate_MCAT(batch):
 def _collate_survpath(batch):
     r"""
     Collate function for survpath
+    Get info as img from item[0], omic_data_list ([1]), label ([2]), event_time ([3]), c censored ([4]), clinical_data_list ([5]) from all items of batch.
+    Put them in a list and return it
     
     Args:
         - batch 
@@ -473,7 +487,7 @@ class SubsetSequentialSampler(Sampler):
 
 def _get_split_loader(args, split_dataset, training = False, testing = False, weighted = False, batch_size=1):
     r"""
-    Take a dataset and make a dataloader from it using a custom collate function. 
+    Take a dataset and make a dataloader from it using a custom (from modality) collate function. 
 
     Args:
         - args : argspace.Namespace
@@ -489,7 +503,7 @@ def _get_split_loader(args, split_dataset, training = False, testing = False, we
     """
 
     kwargs = {'num_workers': 8} if device.type == "cuda" else {}
-    
+    # get loader collate_fn according to type of modality selected, get important info from all items of batch
     if args.modality in ["omics", "snn", "mlp_per_path"]:
         collate_fn = _collate_omics
     elif args.modality in ["abmil_wsi", "abmil_wsi_pathways", "deepmisl_wsi", "deepmisl_wsi_pathways", "mlp_wsi", "transmil_wsi", "transmil_wsi_pathways"]:
@@ -497,10 +511,11 @@ def _get_split_loader(args, split_dataset, training = False, testing = False, we
     elif args.modality in ["coattn", "coattn_motcat"]:  
         collate_fn = _collate_MCAT
     elif args.modality == "survpath":
-         collate_fn = _collate_survpath 
+        collate_fn = _collate_survpath 
     else:
         raise NotImplementedError
 
+    # get DataLoaders for train or validation (or testing), divide the classes balanced among the splits
     if not testing:
         if training:
             if weighted:

@@ -110,8 +110,11 @@ class SurvPath(nn.Module):
             sig_networks.append(nn.Sequential(*fc_omic))
         self.sig_networks = nn.ModuleList(sig_networks)    
     
-    def forward(self, **kwargs):
-
+    def forward(self, **kwargs):   
+        r'''
+        Define the computation performed at every call. To use the model, we pass it the input data. This executes the model’s forward, along with some background operations
+        '''
+        
         wsi = kwargs['x_path']
         x_omic = [kwargs['x_omic%d' % i] for i in range(1,self.num_pathways+1)]
         mask = None

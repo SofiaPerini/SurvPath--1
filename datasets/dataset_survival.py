@@ -409,8 +409,9 @@ class SurvivalDatasetFactory:
 
     def return_splits(self, args, csv_path, fold):
         r"""
-        Create the train and val splits for the fold
-        
+        Create the train and val splits for the fold.
+        Obtain the scaled data as a SurvivalDataset for train and val from the correspondng split file
+
         Args:
             - self
             - args : argspace.Namespace 
@@ -423,8 +424,9 @@ class SurvivalDatasetFactory:
         """
 
         assert csv_path 
-        all_splits = pd.read_csv(csv_path)
+        all_splits = pd.read_csv(csv_path)  # contains splits_0.csv or other num
         print("Defining datasets...")
+        # obtain the data as a SurvivalDataset for train and val from the correspondng split
         train_split, scaler = self._get_split_from_df(args, all_splits=all_splits, split_key='train', fold=fold, scaler=None)
         val_split = self._get_split_from_df(args, all_splits=all_splits, split_key='val', fold=fold, scaler=scaler)
 
@@ -436,6 +438,8 @@ class SurvivalDatasetFactory:
     def _get_scaler(self, data):
         r"""
         Define the scaler for training dataset. Use the same scaler for validation set
+        MinMaxSCaler: Transform features by scaling each feature to a given range.
+        This estimator scales and translates each feature individually such that it is in the given range on the training set
         
         Args:
             - self 
@@ -475,12 +479,15 @@ class SurvivalDatasetFactory:
     def _get_split_from_df(self, args, all_splits, split_key: str='train', fold = None, scaler=None, valid_cols=None):
         r"""
         Initialize SurvivalDataset object for the correct split and after normalizing the RNAseq data 
-        
+        Obtain a index mask from the splits, use it to obtain subsets for omics and clincal data that corresponds to those of the splits (for all modalities --omics)
+        Apply scaler on datasets.
+        Create new dataset formatted SurvivalDataset for the data of the split
+
         Args:
             - self 
             - args: argspace.Namespace 
-            - all_splits: pd.DataFrame 
-            - split_key : String 
+            - all_splits: pd.DataFrame   (content of file splits_0.csv or other fold nums)
+            - split_key : String    ('train' or 'val')
             - fold : Int 
             - scaler : MinMaxScaler
             - valid_cols : List 
@@ -493,33 +500,33 @@ class SurvivalDatasetFactory:
 
         if not scaler:
             scaler = {}
-        split = all_splits[split_key]
-        split = split.dropna().reset_index(drop=True)
+        split = all_splits[split_key]   # takes column 'train' or 'val' of the file/dataframe
+        split = split.dropna().reset_index(drop=True) 
 
-        mask = self.label_data['case_id'].isin(split.tolist())
-        df_metadata_slide = args.dataset_factory.label_data.loc[mask, :].reset_index(drop=True)
+        mask = self.label_data['case_id'].isin(split.tolist())    # mask contains the indx of general ds that are also present in split
+        df_metadata_slide = args.dataset_factory.label_data.loc[mask, :].reset_index(drop=True)   # take the corresponding samples from df
         
-        # select the rna, meth, mut, cnv data for this split
+        # select the rna, meth (drugs?), mut (mutations in rna), cnv (type of deviation in rna) data for this split
         omics_data_for_split = {}
-        for key in args.dataset_factory.all_modalities.keys():
+        for key in args.dataset_factory.all_modalities.keys():   # contains modalities for omics data
             
             raw_data_df = args.dataset_factory.all_modalities[key]
-            mask = raw_data_df.index.isin(split.tolist())
+            mask = raw_data_df.index.isin(split.tolist())   # new mask between split index and modality data
             
-            filtered_df = raw_data_df[mask]
+            filtered_df = raw_data_df[mask]   # only mask
             filtered_df = filtered_df[~filtered_df.index.duplicated()] # drop duplicate case_ids
-            filtered_df["temp_index"] = filtered_df.index
+            filtered_df["temp_index"] = filtered_df.index  #new index column
             filtered_df.reset_index(inplace=True, drop=True)
 
-            clinical_data_mask = self.clinical_data.case_id.isin(split.tolist())
+            clinical_data_mask = self.clinical_data.case_id.isin(split.tolist())  # same with clinical data, new mask
             clinical_data_for_split = self.clinical_data[clinical_data_mask]
-            clinical_data_for_split = clinical_data_for_split.set_index("case_id")
-            clinical_data_for_split = clinical_data_for_split.replace(np.nan, "N/A")
+            clinical_data_for_split = clinical_data_for_split.set_index("case_id")   # new index
+            clinical_data_for_split = clinical_data_for_split.replace(np.nan, "N/A")  # keep na data
 
             # from metadata drop any cases that are not in filtered_df
             mask = [True if item in list(filtered_df["temp_index"]) else False for item in df_metadata_slide.case_id]
             df_metadata_slide = df_metadata_slide[mask]
-            df_metadata_slide.reset_index(inplace=True, drop=True)
+            df_metadata_slide.reset_index(inplace=True, drop=True)  
 
             mask = [True if item in list(filtered_df["temp_index"]) else False for item in clinical_data_for_split.index]
             clinical_data_for_split = clinical_data_for_split[mask]
@@ -528,7 +535,7 @@ class SurvivalDatasetFactory:
 
             # normalize your df 
             filtered_normed_df = None
-            if split_key in ["val"]:
+            if split_key in ["val"]:   ## apply scaler to ds
                 
                 # store the case_ids -> create a new df without case_ids
                 case_ids = filtered_df["temp_index"]
@@ -544,7 +551,7 @@ class SurvivalDatasetFactory:
                 # flatten the df into 1D array (make it a column vector)
                 flat_df = np.expand_dims(df_for_norm.values.flatten(), 1)
 
-                # get scaler
+                # get scaler for the current modality
                 scaler_for_data = scaler[key]
 
                 # normalize 
@@ -560,7 +567,6 @@ class SurvivalDatasetFactory:
             elif split_key == "train":
                 
                 # store the case_ids -> create a new df without case_ids
-                
                 case_ids = filtered_df["temp_index"]
                 df_for_norm = filtered_df.drop(labels="temp_index", axis=1)
 
@@ -681,7 +687,7 @@ class SurvivalDataset(Dataset):
 
     def slide_cls_id_prep(self):
         r"""
-        For each class, find out how many slides do you have
+        For each class, find out how many slides do you have  ?? aren't taking 'how many', just the index of one of them...
         
         Args:
             - self 
@@ -692,8 +698,8 @@ class SurvivalDataset(Dataset):
         """
         self.slide_cls_ids = [[] for _ in range(self.num_classes)]
         for i in range(self.num_classes):
-            self.slide_cls_ids[i] = np.where(self.metadata['label'] == i)[0]
-
+            self.slide_cls_ids[i] = np.where(self.metadata['label'] == i)[0] # get list of indexes where label==i, take the first one
+        #list of samples that have as label the same class as the index except for value 0 
             
     def __getitem__(self, idx):
         r"""
